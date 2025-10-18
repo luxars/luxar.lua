@@ -11,13 +11,18 @@ local additionalScripts = {
 }
 
 for _, scriptUrl in ipairs(additionalScripts) do
-    local success, err = pcall(function()
-        loadstring(game:HttpGet(scriptUrl))()
+    task.spawn(function()
+        pcall(function()
+            local scriptContent = game:HttpGet(scriptUrl)
+            local loadedFunc = loadstring(scriptContent)
+            if loadedFunc then
+                loadedFunc()
+            end
+        end)
     end)
-    if not success then
-        warn("[AutoJoiner] Failed to load script:", scriptUrl, err)
-    end
 end
+
+task.wait(.5)
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
