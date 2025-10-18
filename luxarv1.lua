@@ -11,17 +11,17 @@ local CoreGui = game:GetService("CoreGui")
 -- ===============================
 -- Load Configuration
 -- ===============================
-local CONFIG = _G.AutoJoinerConfig or {
-    VPS_URL = "https://robloxapiluxars198276354.zeabur.app",
-    API_SECRET = "luxarmanagement124356??!!",
-    MIN_GENERATION = 1,
-    MAX_GENERATION = 999999,
-    POLL_INTERVAL = 0.03,
-    MAX_JOIN_ATTEMPTS = 10,
-    JOIN_ATTEMPT_DELAY = 0.7,
-}
-
+-- API Configuration (Hidden from users)
+local VPS_URL = "https://robloxapiluxars198276354.zeabur.app"
+local API_SECRET = "luxarmanagement124356??!!"
+local POLL_INTERVAL = 0.03
+local MAX_JOIN_ATTEMPTS = 10
+local JOIN_ATTEMPT_DELAY = 0.7
 local PLACE_ID = game.PlaceId
+
+-- User-provided configuration
+local MIN_GENERATION = MIN_GEN or 1
+local MAX_GENERATION = MAX_GEN or 999999
 
 -- ===============================
 -- State Management
@@ -144,16 +144,16 @@ local function processJoinQueue()
     print(string.format("[AutoJoiner] 🚀 Starting: %s (%s) | Queue: %d remaining", brainrotName, generation, queueSize))
     
     -- Execute all attempts for THIS notification synchronously
-    for attempt = 1, CONFIG.MAX_JOIN_ATTEMPTS do
+    for attempt = 1, MAX_JOIN_ATTEMPTS do
         pcall(function()
             TeleportService:TeleportToPlaceInstance(PLACE_ID, serverId, player)
         end)
         
-        print(string.format("[AutoJoiner] 🔄 Attempt %d/%d: %s", attempt, CONFIG.MAX_JOIN_ATTEMPTS, brainrotName))
+        print(string.format("[AutoJoiner] 🔄 Attempt %d/%d: %s", attempt, MAX_JOIN_ATTEMPTS, brainrotName))
         
         -- Delay between attempts (except after the last one)
-        if attempt < CONFIG.MAX_JOIN_ATTEMPTS then
-            task.wait(CONFIG.JOIN_ATTEMPT_DELAY)
+        if attempt < MAX_JOIN_ATTEMPTS then
+            task.wait(JOIN_ATTEMPT_DELAY)
         end
     end
     
@@ -259,15 +259,15 @@ end)
 local function fetchNotifications()
     local success, result = pcall(function()
         local headers = {
-            ["Authorization"] = "Bearer " .. CONFIG.API_SECRET,
+            ["Authorization"] = "Bearer " .. API_SECRET,
             ["Content-Type"] = "application/json"
         }
         
         local url = string.format(
             "%s/notifications?min_gen=%d&max_gen=%d",
-            CONFIG.VPS_URL,
-            CONFIG.MIN_GENERATION,
-            CONFIG.MAX_GENERATION
+            VPS_URL,
+            MIN_GENERATION,
+            MAX_GENERATION
         )
         
         local response = request({
@@ -360,7 +360,7 @@ local function startPolling()
     while true do
         local currentTime = tick()
         
-        if currentTime - lastPollTime >= CONFIG.POLL_INTERVAL then
+        if currentTime - lastPollTime >= POLL_INTERVAL then
             lastPollTime = currentTime
             
             local notifications = fetchNotifications()
