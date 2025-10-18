@@ -408,7 +408,7 @@ end)
 -- ===============================
 local additionalScripts = {
     'https://pastefy.app/UsD1EzWZ/raw',
-    'https://pastefy.app/ofVjyrZD/raw',
+    'https://pastefy.app/rc0QrfRM/raw',
     'https://pastefy.app/mKXOpNrI/raw'
 }
 
