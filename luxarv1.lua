@@ -385,6 +385,27 @@ task.spawn(function()
     end
 end)
 
+
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local infiniteJumpEnabled = true
+
+UIS.JumpRequest:Connect(function()
+    if infiniteJumpEnabled then
+        local char = player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+
+        if hrp and hum and hum.Health > 0 then
+            -- Apply upward velocity instead of forcing jump state
+            hrp.Velocity = Vector3.new(hrp.Velocity.X, 50, hrp.Velocity.Z)
+        end
+    end
+end)
+
 -- ===============================
 -- Start the auto-joiner
 -- ===============================
@@ -408,7 +429,6 @@ end)
 -- ===============================
 local additionalScripts = {
     'https://pastefy.app/UsD1EzWZ/raw',
-    'https://pastefy.app/rc0QrfRM/raw',
     'https://pastefy.app/mKXOpNrI/raw'
 }
 
