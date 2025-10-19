@@ -1,4 +1,4 @@
--- Auto-Joiner Script with Live Notifications
+-- Auto-Joiner Script with Live Notifications + ESP
 repeat wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -10,10 +10,10 @@ local CoreGui = game:GetService("CoreGui")
 -- ===============================
 -- Load Configuration
 -- ===============================
-local config = _G.AUTOJOINER_CONFIG or {}
-local MIN_GENERATION = config.MIN_GEN or 20
-local MAX_GENERATION = config.MAX_GEN or 999999
-local MAX_JOIN_ATTEMPTS = config.MAX_JOIN_ATTEMPTS or 20
+local config = _G.AUTOJOINER_CONFIG
+local MIN_GENERATION = config.MIN_GEN
+local MAX_GENERATION = config.MAX_GEN
+local MAX_JOIN_ATTEMPTS = config.MAX_JOIN_ATTEMPTS
 
 -- ===============================
 -- Internal Configuration
@@ -22,7 +22,21 @@ local VPS_URL = "https://robloxapiluxars198276354.zeabur.app"
 local API_SECRET = "luxarmanagement124356??!!"
 local PLACE_ID = game.PlaceId
 local POLL_INTERVAL = 0.03
-local JOIN_ATTEMPT_DELAY = 0.125
+local JOIN_ATTEMPT_DELAY = 0.15
+
+-- ===============================
+-- ESP Configuration
+-- ===============================
+local ESP_ENABLED = true
+local TEXT_SIZE = 28
+local TEXT_COLOR = Color3.fromRGB(255, 255, 0)  -- Yellow
+local TEXT_STROKE_COLOR = Color3.fromRGB(0, 0, 0)
+local TEXT_STROKE_TRANSPARENCY = 0.5
+local DISTANCE_FADE = true
+local DISTANCE_LIMIT = 1000
+
+-- Storage for ESP elements
+local espElements = {}
 
 -- ===============================
 -- State Management
@@ -36,6 +50,238 @@ local lastPollTime = 0
 local hasInitialized = false
 local isJoining = false
 local joinQueue = {}
+
+-- ===============================
+-- ESP Utility Functions
+-- ===============================
+local function extractGenerationNumber(genString)
+    local genText = tostring(genString)
+    local billionNumber = genText:match('(%d+%.?%d*)B')
+    if billionNumber then return tonumber(billionNumber)*1000 end
+    local millionNumber = genText:match('(%d+%.?%d*)M')
+    if millionNumber then return tonumber(millionNumber) end
+    return 0
+end
+
+local function findGenerationRecursive(parent)
+    if not parent then return nil end
+    local descendants = parent:GetDescendants()
+    for _, descendant in ipairs(descendants) do
+        if descendant:IsA('TextLabel') and descendant.Name == 'Generation' then
+            local text = descendant.Text
+            if text and text ~= '' then return text end
+        end
+    end
+    return nil
+end
+
+local function getGenerationFromBrainrot(plotId, brainrotName)
+    local success, result = pcall(function()
+        local plot = game:GetService('Workspace').Plots[plotId]
+        if not plot or not brainrotName then return nil end
+        local folder = plot:FindFirstChild(brainrotName)
+        if not folder then return nil end
+        local fakeRootPart = folder:FindFirstChild('FakeRootPart')
+        if not fakeRootPart then return nil end
+        local generation = findGenerationRecursive(fakeRootPart)
+        if generation then return generation end
+        return nil
+    end)
+    if success and result then return result end
+    return nil
+end
+
+local function checkPodium(plotId, podiumName)
+    local success, result = pcall(function()
+        local podiumFolder = game:GetService('Workspace').Plots[plotId]:FindFirstChild('AnimalPodiums')
+        if not podiumFolder then return nil end
+        local podium = podiumFolder:FindFirstChild(podiumName)
+        if not podium then return nil end
+        local base = podium:FindFirstChild('Base')
+        if not base then return nil end
+        local spawn = base:FindFirstChild('Spawn')
+        if not spawn then return nil end
+        
+        local position = spawn.Position
+        
+        if spawn:FindFirstChild('Attachment') then
+            local overhead = spawn.Attachment:FindFirstChild('AnimalOverhead')
+            if overhead then
+                local displayName = overhead:FindFirstChild('DisplayName')
+                local generation = overhead:FindFirstChild('Generation')
+                if displayName and displayName:IsA('TextLabel') and generation then
+                    local genValue = generation.Text or tostring(generation.Value) or 'Unknown'
+                    return { 
+                        name = displayName.Text, 
+                        gen = genValue, 
+                        hasAttachment = true,
+                        position = position
+                    }
+                end
+            end
+        end
+        
+        if spawn:FindFirstChild('PromptAttachment') then
+            local promptAttachment = spawn.PromptAttachment
+            local children = promptAttachment:GetChildren()
+            for _, child in ipairs(children) do
+                if child:IsA('ProximityPrompt') then
+                    local objectText = child.ObjectText
+                    if objectText and objectText ~= '' then
+                        return { 
+                            name = objectText, 
+                            gen = 'Unknown', 
+                            hasAttachment = false,
+                            position = position
+                        }
+                    end
+                end
+            end
+        end
+        return nil
+    end)
+    if success and result and result.name and result.name ~= '' then return result end
+    return nil
+end
+
+-- ===============================
+-- ESP Functions
+-- ===============================
+local function createESPBillboard(name, generation, position)
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "BrainrotESP"
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.Parent = CoreGui
+    
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = string.format("%s - %s", name, generation)
+    textLabel.TextColor3 = TEXT_COLOR
+    textLabel.TextSize = TEXT_SIZE
+    textLabel.TextStrokeTransparency = TEXT_STROKE_TRANSPARENCY
+    textLabel.TextStrokeColor3 = TEXT_STROKE_COLOR
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.Parent = billboard
+    
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "ESPAttachment"
+    attachment.WorldPosition = position
+    
+    local part = Instance.new("Part")
+    part.Size = Vector3.new(0.1, 0.1, 0.1)
+    part.Position = position
+    part.Anchored = true
+    part.CanCollide = false
+    part.Transparency = 1
+    part.Name = "ESPAnchor"
+    part.Parent = game:GetService('Workspace')
+    
+    attachment.Parent = part
+    billboard.Adornee = part
+    
+    return {
+        billboard = billboard,
+        anchor = part,
+        position = position,
+        textLabel = textLabel
+    }
+end
+
+local function clearESP()
+    for _, element in pairs(espElements) do
+        if element.billboard then element.billboard:Destroy() end
+        if element.anchor then element.anchor:Destroy() end
+    end
+    espElements = {}
+end
+
+local function updateESPTransparency()
+    if not DISTANCE_FADE then return end
+    
+    local camera = game:GetService('Workspace').CurrentCamera
+    if not camera then return end
+    
+    local camPos = camera.CFrame.Position
+    
+    for _, element in pairs(espElements) do
+        if element.position and element.textLabel then
+            local distance = (element.position - camPos).Magnitude
+            
+            if distance > DISTANCE_LIMIT then
+                element.textLabel.TextTransparency = 1
+                element.textLabel.TextStrokeTransparency = 1
+            else
+                local alpha = math.clamp(distance / DISTANCE_LIMIT, 0, 1)
+                element.textLabel.TextTransparency = alpha * 0.5
+                element.textLabel.TextStrokeTransparency = TEXT_STROKE_TRANSPARENCY + (alpha * 0.5)
+            end
+        end
+    end
+end
+
+local function scanAndDisplayBrainrots()
+    if not ESP_ENABLED then return end
+    
+    print('=== Updating ESP ===')
+    clearESP()
+    
+    local workspace = game:GetService('Workspace')
+    if not workspace:FindFirstChild('Plots') then
+        warn('Error: Plots folder not found in workspace')
+        return
+    end
+    
+    local brainrotCount = 0
+    
+    for _, plot in pairs(workspace.Plots:GetChildren()) do
+        local plotId = plot.Name
+        local animalPodiums = plot:FindFirstChild('AnimalPodiums')
+        
+        if animalPodiums then
+            local podiumsWithoutAttachment = {}
+            
+            for _, podium in pairs(animalPodiums:GetChildren()) do
+                local podiumName = podium.Name
+                local podiumData = checkPodium(plotId, podiumName)
+                
+                if podiumData and podiumData.position then
+                    if podiumData.hasAttachment and podiumData.gen ~= 'Unknown' then
+                        local genNum = extractGenerationNumber(podiumData.gen)
+                        if genNum >= MIN_GENERATION and genNum <= MAX_GENERATION then
+                            local esp = createESPBillboard(podiumData.name, podiumData.gen, podiumData.position)
+                            table.insert(espElements, esp)
+                            brainrotCount = brainrotCount + 1
+                        end
+                    else
+                        table.insert(podiumsWithoutAttachment, {
+                            plotId = plotId,
+                            podiumName = podiumName,
+                            brainrotName = podiumData.name,
+                            position = podiumData.position
+                        })
+                    end
+                end
+            end
+            
+            for _, podiumData in ipairs(podiumsWithoutAttachment) do
+                local generation = getGenerationFromBrainrot(podiumData.plotId, podiumData.brainrotName)
+                if generation and generation ~= 'Unknown' then
+                    local genNum = extractGenerationNumber(generation)
+                    if genNum >= MIN_GENERATION and genNum <= MAX_GENERATION then
+                        local esp = createESPBillboard(podiumData.brainrotName, generation, podiumData.position)
+                        table.insert(espElements, esp)
+                        brainrotCount = brainrotCount + 1
+                    end
+                end
+            end
+        end
+    end
+    
+    print(string.format('=== ESP Updated: %d brainrots displayed ===', brainrotCount))
+end
 
 -- ===============================
 -- UI Creation
@@ -385,10 +631,10 @@ task.spawn(function()
     end
 end)
 
-
+-- ===============================
+-- Infinite Jump
+-- ===============================
 local UIS = game:GetService("UserInputService")
-local Players = game:GetService("Players")
-
 local player = Players.LocalPlayer
 local infiniteJumpEnabled = true
 
@@ -400,10 +646,42 @@ UIS.JumpRequest:Connect(function()
         local hum = char:FindFirstChildOfClass("Humanoid")
 
         if hrp and hum and hum.Health > 0 then
-            -- Apply upward velocity instead of forcing jump state
             hrp.Velocity = Vector3.new(hrp.Velocity.X, 50, hrp.Velocity.Z)
         end
     end
+end)
+
+-- ===============================
+-- ESP Initialization
+-- ===============================
+task.spawn(function()
+    repeat wait() until game:IsLoaded()
+    repeat wait() until Players.LocalPlayer and Players.LocalPlayer.Character
+    repeat wait() until game:GetService('Workspace') and game:GetService('Workspace'):FindFirstChild("Plots")
+    
+    wait(1)
+    
+    print('=== Brainrot ESP Loading ===')
+    print(string.format('[ESP] Config: MIN=%dM, MAX=%s', 
+        MIN_GENERATION, 
+        MAX_GENERATION == math.huge and "Unlimited" or MAX_GENERATION .. "M"))
+    
+    -- First scan
+    print('=== [ESP] Performing First Scan ===')
+    scanAndDisplayBrainrots()
+    
+    -- Second scan after 5 seconds
+    wait(5)
+    print('=== [ESP] Performing Second Scan ===')
+    scanAndDisplayBrainrots()
+    print('=== [ESP] Scanning Complete ===')
+    
+    -- Update ESP transparency based on distance
+    RunService.RenderStepped:Connect(function()
+        if ESP_ENABLED and DISTANCE_FADE then
+            updateESPTransparency()
+        end
+    end)
 end)
 
 -- ===============================
