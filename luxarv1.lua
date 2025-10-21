@@ -59,10 +59,25 @@ local joinQueue = {}
 -- ===============================
 local function extractGenerationNumber(genString)
     local genText = tostring(genString)
+    
+    -- Handle "B" format (e.g., "1.5B")
     local billionNumber = genText:match('(%d+%.?%d*)B')
     if billionNumber then return tonumber(billionNumber)*1000 end
+    
+    -- Handle "M" format (e.g., "90M")
     local millionNumber = genText:match('(%d+%.?%d*)M')
     if millionNumber then return tonumber(millionNumber) end
+    
+    -- Handle raw numbers (API might send just numbers)
+    local rawNumber = tonumber(genText)
+    if rawNumber then
+        -- If it's a large number (likely raw generation count), convert to millions
+        if rawNumber >= 1000000 then
+            return rawNumber / 1000000
+        end
+        return rawNumber
+    end
+    
     return 0
 end
 
@@ -606,6 +621,14 @@ local function processNotifications(newNotifications)
             local serverId = notification.server_id
             local brainrotName = notification.name
             local generation = notification.generation
+            
+            -- DEBUG: Log raw API data for Esok Sekolah
+            local normalizedName = normalizeString(brainrotName)
+            if normalizedName == normalizeString("Esok Sekolah") then
+                local genNum = extractGenerationNumber(generation)
+                print(string.format("[DEBUG] API Data - Name: '%s' | Gen Raw: '%s' | Gen Parsed: %s | Should Process: %s", 
+                    brainrotName, tostring(generation), genNum, tostring(shouldProcessBrainrot(brainrotName, generation))))
+            end
             
             if shouldProcessBrainrot(brainrotName, generation) then
                 local notifKey = serverId .. "_" .. brainrotName .. "_" .. notifTimestamp
