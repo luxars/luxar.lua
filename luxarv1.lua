@@ -60,11 +60,14 @@ local joinQueue = {}
 local function extractGenerationNumber(genString)
     local genText = tostring(genString)
     
-    -- Handle "B" format (e.g., "1.5B")
+    -- Remove common prefixes/suffixes: $, /s, spaces
+    genText = genText:gsub("%$", ""):gsub("/s", ""):gsub("%s+", "")
+    
+    -- Handle "B" format (e.g., "1.5B", "$1.5B/s")
     local billionNumber = genText:match('(%d+%.?%d*)B')
     if billionNumber then return tonumber(billionNumber)*1000 end
     
-    -- Handle "M" format (e.g., "90M")
+    -- Handle "M" format (e.g., "90M", "$90M/s")
     local millionNumber = genText:match('(%d+%.?%d*)M')
     if millionNumber then return tonumber(millionNumber) end
     
