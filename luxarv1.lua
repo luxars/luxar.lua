@@ -165,29 +165,32 @@ local function compareGenerations(operator, genValue, targetValue)
     return false
 end
 
+local function normalizeString(str)
+    -- Remove extra spaces and convert to lowercase for comparison
+    return tostring(str):gsub("%s+", " "):lower():match("^%s*(.-)%s*$")
+end
+
 local function shouldProcessBrainrot(brainrotName, generationText)
+    -- Normalize the brainrot name for comparison
+    local normalizedName = normalizeString(brainrotName)
+    
     -- First check if explicitly excluded
-    if CUSTOM_EXCLUDE[brainrotName] then
-        return false
+    for excludeName, _ in pairs(CUSTOM_EXCLUDE) do
+        if normalizeString(excludeName) == normalizedName then
+            return false
+        end
     end
     
     -- Extract generation number
     local genNum = extractGenerationNumber(generationText)
     
     -- Check if there's a custom INCLUDE rule for this brainrot
-    if CUSTOM_INCLUDE[brainrotName] then
-        local rule = CUSTOM_INCLUDE[brainrotName]
-        local operator = rule.OPERATOR or ">="
-        local targetValue = rule.VALUE or 0
-        
-        if compareGenerations(operator, genNum, targetValue) then
-            print(string.format("[Filter] ✅ CUSTOM RULE: %s (%sM) matches rule %s %sM", 
-                brainrotName, genNum, operator, targetValue))
-            return true
-        else
-            print(string.format("[Filter] ❌ CUSTOM RULE: %s (%sM) doesn't match rule %s %sM", 
-                brainrotName, genNum, operator, targetValue))
-            return false
+    for includeName, rule in pairs(CUSTOM_INCLUDE) do
+        if normalizeString(includeName) == normalizedName then
+            local operator = rule.OPERATOR or ">="
+            local targetValue = rule.VALUE or 0
+            
+            return compareGenerations(operator, genNum, targetValue)
         end
     end
     
@@ -731,29 +734,7 @@ end)
 -- ===============================
 print("===========================================")
 print("[AutoJoiner] 🎮 Auto-Joiner Loaded")
-print("[AutoJoiner] 🎯 Base Range:", MIN_GENERATION .. "M -", MAX_GENERATION .. "M")
-print("[AutoJoiner] ⚙️ Config:", MAX_JOIN_ATTEMPTS, "attempts @", JOIN_ATTEMPT_DELAY .. "s delay")
-
--- Print custom include rules
-local includeCount = 0
-for _ in pairs(CUSTOM_INCLUDE) do includeCount = includeCount + 1 end
-if includeCount > 0 then
-    print("[AutoJoiner] 🎯 Custom Include Rules:", includeCount)
-    for name, rule in pairs(CUSTOM_INCLUDE) do
-        print(string.format("  - %s: %s %sM", name, rule.OPERATOR, rule.VALUE))
-    end
-end
-
--- Print custom exclude rules
-local excludeCount = 0
-for _ in pairs(CUSTOM_EXCLUDE) do excludeCount = excludeCount + 1 end
-if excludeCount > 0 then
-    print("[AutoJoiner] ⛔ Custom Exclude Rules:", excludeCount)
-    for name, _ in pairs(CUSTOM_EXCLUDE) do
-        print(string.format("  - %s", name))
-    end
-end
-
+print("[AutoJoiner] 🎯 Tracking:", MIN_GENERATION .. "M -", MAX_GENERATION .. "M")
 print("===========================================")
 
 updateAutoJoinButton()
