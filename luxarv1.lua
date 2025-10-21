@@ -565,12 +565,23 @@ local function fetchNotifications()
             ["Content-Type"] = "application/json"
         }
         
+        -- Calculate effective min_gen considering INCLUDE rules
+        local effectiveMinGen = MIN_GENERATION
+        for name, rule in pairs(CUSTOM_INCLUDE) do
+            local ruleValue = rule.VALUE or 0
+            if ruleValue < effectiveMinGen then
+                effectiveMinGen = ruleValue
+            end
+        end
+        
         local url = string.format(
             "%s/notifications?min_gen=%d&max_gen=%d",
             VPS_URL,
-            MIN_GENERATION,
+            effectiveMinGen,
             MAX_GENERATION
         )
+        
+        print(string.format("[DEBUG] Fetching from API (min: %dM, max: %dM)", effectiveMinGen, MAX_GENERATION))
         
         local response = request({
             Url = url,
@@ -580,7 +591,18 @@ local function fetchNotifications()
         
         if response and response.StatusCode == 200 then
             local data = HttpService:JSONDecode(response.Body)
-            return data.notifications or {}
+            local notifications = data.notifications or {}
+            
+            print(string.format("[DEBUG] Received %d notifications from API", #notifications))
+            
+            -- Debug: Show all notification names
+            for i, notif in ipairs(notifications) do
+                if i <= 5 then -- Only show first 5 to avoid spam
+                    print(string.format("[DEBUG] Notification %d: %s (%s)", i, notif.name, tostring(notif.generation)))
+                end
+            end
+            
+            return notifications
         else
             return nil
         end
@@ -617,22 +639,28 @@ local function processNotifications(newNotifications)
     
     local newCount = 0
     
+    print(string.format("[DEBUG] Processing %d notifications", #newNotifications))
+    
     for _, notification in ipairs(newNotifications) do
         local notifTimestamp = notification.timestamp
+        local serverId = notification.server_id
+        local brainrotName = notification.name
+        local generation = notification.generation
+        
+        -- DEBUG: Log ALL notifications to see what's coming through
+        local normalizedName = normalizeString(brainrotName)
+        if normalizedName == normalizeString("Esok Sekolah") then
+            local genNum = extractGenerationNumber(generation)
+            print(string.format("[DEBUG] Found Esok Sekolah!"))
+            print(string.format("[DEBUG]   Name: '%s'", brainrotName))
+            print(string.format("[DEBUG]   Gen Raw: '%s'", tostring(generation)))
+            print(string.format("[DEBUG]   Gen Parsed: %s", genNum))
+            print(string.format("[DEBUG]   Timestamp: %s vs Last: %s", tostring(notifTimestamp), tostring(lastNotificationTimestamp)))
+            print(string.format("[DEBUG]   Timestamp Check: %s", tostring(not lastNotificationTimestamp or notifTimestamp > lastNotificationTimestamp)))
+            print(string.format("[DEBUG]   Should Process: %s", tostring(shouldProcessBrainrot(brainrotName, generation))))
+        end
         
         if not lastNotificationTimestamp or notifTimestamp > lastNotificationTimestamp then
-            local serverId = notification.server_id
-            local brainrotName = notification.name
-            local generation = notification.generation
-            
-            -- DEBUG: Log raw API data for Esok Sekolah
-            local normalizedName = normalizeString(brainrotName)
-            if normalizedName == normalizeString("Esok Sekolah") then
-                local genNum = extractGenerationNumber(generation)
-                print(string.format("[DEBUG] API Data - Name: '%s' | Gen Raw: '%s' | Gen Parsed: %s | Should Process: %s", 
-                    brainrotName, tostring(generation), genNum, tostring(shouldProcessBrainrot(brainrotName, generation))))
-            end
-            
             if shouldProcessBrainrot(brainrotName, generation) then
                 local notifKey = serverId .. "_" .. brainrotName .. "_" .. notifTimestamp
                 if not processedNotifications[notifKey] then
