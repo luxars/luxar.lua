@@ -759,7 +759,7 @@ end)
 -- Start the auto-joiner
 -- ===============================
 print("===========================================")
-print("[AutoJoiner] 🎮 Auto-Joiner Loaded")
+print("[.gg/luxar] 🎮 Auto-Joiner Loaded")
 print("[AutoJoiner] 🎯 Tracking:", MIN_GENERATION .. "M -", MAX_GENERATION .. "M")
 print("===========================================")
 
