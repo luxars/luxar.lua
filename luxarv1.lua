@@ -660,7 +660,6 @@ end
 -- Main Loop
 -- ===============================
 local function startPolling()
-    print("[AutoJoiner] 🚀 Polling started")
     
     while true do
         local currentTime = tick()
