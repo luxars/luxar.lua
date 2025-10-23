@@ -32,7 +32,7 @@ local JOIN_ATTEMPT_DELAY = 0.15
 local ESP_ENABLED = true
 local ESP_SCAN_INTERVAL = 1
 local TEXT_SIZE = 28
-local TEXT_COLOR = Color3.fromRGB(255, 255, 0)
+local TEXT_COLOR = Color3.fromRGB(255, 255, 0)  -- Yellow
 local TEXT_STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 local TEXT_STROKE_TRANSPARENCY = 0.5
 local DISTANCE_FADE = true
@@ -45,6 +45,7 @@ local espElements = {}
 -- State Management
 -- ===============================
 local autoJoinEnabled = false
+local notifications = {}
 local processedNotifications = {}
 local lastNotificationTimestamp = nil
 local isConnected = false
@@ -53,80 +54,38 @@ local hasInitialized = false
 local isJoining = false
 local joinQueue = {}
 
--- Pre-calculate effective min generation for API
-local EFFECTIVE_MIN_GEN = MIN_GENERATION
-for name, rule in pairs(CUSTOM_INCLUDE) do
-    local ruleValue = rule.VALUE or 0
-    if ruleValue < EFFECTIVE_MIN_GEN then
-        EFFECTIVE_MIN_GEN = ruleValue
-    end
-end
-
 -- ===============================
--- Utility Functions
+-- ESP Utility Functions
 -- ===============================
 local function extractGenerationNumber(genString)
-    local genText = tostring(genString):gsub("%$", ""):gsub("/s", ""):gsub("%s+", "")
+    local genText = tostring(genString)
     
+    -- Remove common prefixes/suffixes: $, /s, spaces
+    genText = genText:gsub("%$", ""):gsub("/s", ""):gsub("%s+", "")
+    
+    -- Handle "B" format (e.g., "1.5B", "$1.5B/s")
     local billionNumber = genText:match('(%d+%.?%d*)B')
-    if billionNumber then return tonumber(billionNumber) * 1000 end
+    if billionNumber then return tonumber(billionNumber)*1000 end
     
+    -- Handle "M" format (e.g., "90M", "$90M/s")
     local millionNumber = genText:match('(%d+%.?%d*)M')
     if millionNumber then return tonumber(millionNumber) end
     
+    -- Handle raw numbers (API might send just numbers)
     local rawNumber = tonumber(genText)
     if rawNumber then
+        -- If it's a large number (likely raw generation count), convert to millions
         if rawNumber >= 1000000 then
             return rawNumber / 1000000
         end
+        -- IMPORTANT: If it's a small number without M or B suffix, it's NOT in millions
+        -- Return 0 to filter it out (e.g., "$150/s" should not be treated as 150M)
         return 0
     end
     
     return 0
 end
 
-local function normalizeString(str)
-    return tostring(str):gsub("%s+", " "):lower():match("^%s*(.-)%s*$")
-end
-
-local function compareGenerations(operator, genValue, targetValue)
-    if operator == ">=" then return genValue >= targetValue
-    elseif operator == ">" then return genValue > targetValue
-    elseif operator == "<=" then return genValue <= targetValue
-    elseif operator == "<" then return genValue < targetValue
-    elseif operator == "==" then return genValue == targetValue
-    end
-    return false
-end
-
-local function shouldProcessBrainrot(brainrotName, generationText)
-    local normalizedName = normalizeString(brainrotName)
-    
-    -- Check exclusion list first
-    for excludeName, _ in pairs(CUSTOM_EXCLUDE) do
-        if normalizeString(excludeName) == normalizedName then
-            return false
-        end
-    end
-    
-    local genNum = extractGenerationNumber(generationText)
-    
-    -- Check custom INCLUDE rules
-    for includeName, rule in pairs(CUSTOM_INCLUDE) do
-        if normalizeString(includeName) == normalizedName then
-            local operator = rule.OPERATOR or ">="
-            local targetValue = rule.VALUE or 0
-            return compareGenerations(operator, genNum, targetValue)
-        end
-    end
-    
-    -- Default range check
-    return genNum >= MIN_GENERATION and genNum <= MAX_GENERATION
-end
-
--- ===============================
--- ESP Functions
--- ===============================
 local function findGenerationRecursive(parent)
     if not parent then return nil end
     local descendants = parent:GetDescendants()
@@ -147,9 +106,12 @@ local function getGenerationFromBrainrot(plotId, brainrotName)
         if not folder then return nil end
         local fakeRootPart = folder:FindFirstChild('FakeRootPart')
         if not fakeRootPart then return nil end
-        return findGenerationRecursive(fakeRootPart)
+        local generation = findGenerationRecursive(fakeRootPart)
+        if generation then return generation end
+        return nil
     end)
-    return success and result or nil
+    if success and result then return result end
+    return nil
 end
 
 local function checkPodium(plotId, podiumName)
@@ -184,7 +146,8 @@ local function checkPodium(plotId, podiumName)
         
         if spawn:FindFirstChild('PromptAttachment') then
             local promptAttachment = spawn.PromptAttachment
-            for _, child in ipairs(promptAttachment:GetChildren()) do
+            local children = promptAttachment:GetChildren()
+            for _, child in ipairs(children) do
                 if child:IsA('ProximityPrompt') then
                     local objectText = child.ObjectText
                     if objectText and objectText ~= '' then
@@ -200,9 +163,68 @@ local function checkPodium(plotId, podiumName)
         end
         return nil
     end)
-    return success and result and result.name and result.name ~= '' and result or nil
+    if success and result and result.name and result.name ~= '' then return result end
+    return nil
 end
 
+-- ===============================
+-- Custom Brainrot Filter System
+-- ===============================
+local function compareGenerations(operator, genValue, targetValue)
+    if operator == ">=" then
+        return genValue >= targetValue
+    elseif operator == ">" then
+        return genValue > targetValue
+    elseif operator == "<=" then
+        return genValue <= targetValue
+    elseif operator == "<" then
+        return genValue < targetValue
+    elseif operator == "==" then
+        return genValue == targetValue
+    end
+    return false
+end
+
+local function normalizeString(str)
+    -- Remove extra spaces and convert to lowercase for comparison
+    return tostring(str):gsub("%s+", " "):lower():match("^%s*(.-)%s*$")
+end
+
+local function shouldProcessBrainrot(brainrotName, generationText)
+    -- Normalize the brainrot name for comparison
+    local normalizedName = normalizeString(brainrotName)
+    
+    -- First check if explicitly excluded
+    for excludeName, _ in pairs(CUSTOM_EXCLUDE) do
+        if normalizeString(excludeName) == normalizedName then
+            return false
+        end
+    end
+    
+    -- Extract generation number
+    local genNum = extractGenerationNumber(generationText)
+    
+    -- Check if there's a custom INCLUDE rule for this brainrot
+    for includeName, rule in pairs(CUSTOM_INCLUDE) do
+        if normalizeString(includeName) == normalizedName then
+            local operator = rule.OPERATOR or ">="
+            local targetValue = rule.VALUE or 0
+            
+            return compareGenerations(operator, genNum, targetValue)
+        end
+    end
+    
+    -- Fall back to default MIN/MAX generation check
+    if genNum >= MIN_GENERATION and genNum <= MAX_GENERATION then
+        return true
+    end
+    
+    return false
+end
+
+-- ===============================
+-- ESP Functions
+-- ===============================
 local function createESPBillboard(name, generation, position)
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "BrainrotESP"
@@ -222,6 +244,10 @@ local function createESPBillboard(name, generation, position)
     textLabel.Font = Enum.Font.GothamBold
     textLabel.Parent = billboard
     
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "ESPAttachment"
+    attachment.WorldPosition = position
+    
     local part = Instance.new("Part")
     part.Size = Vector3.new(0.1, 0.1, 0.1)
     part.Position = position
@@ -231,6 +257,7 @@ local function createESPBillboard(name, generation, position)
     part.Name = "ESPAnchor"
     part.Parent = game:GetService('Workspace')
     
+    attachment.Parent = part
     billboard.Adornee = part
     
     return {
@@ -279,7 +306,9 @@ local function scanAndDisplayBrainrots()
     clearESP()
     
     local workspace = game:GetService('Workspace')
-    if not workspace:FindFirstChild('Plots') then return end
+    if not workspace:FindFirstChild('Plots') then
+        return
+    end
     
     for _, plot in pairs(workspace.Plots:GetChildren()) do
         local plotId = plot.Name
@@ -410,19 +439,28 @@ end
 local screenGui, connectionFrame, notificationsFrame, autoJoinButton = createUI()
 
 -- ===============================
--- Join Server Function
+-- Join Server Function with Retry Logic
 -- ===============================
 local function processJoinQueue()
-    if isJoining or #joinQueue == 0 then return end
+    if isJoining then return end
+    if #joinQueue == 0 then return end
     
     isJoining = true
     local joinData = table.remove(joinQueue, 1)
+    local serverId = joinData.serverId
+    local brainrotName = joinData.brainrotName
+    local generation = joinData.generation
+    local queueSize = #joinQueue
     local player = Players.LocalPlayer
+    
+    print(string.format("[AutoJoiner] 🚀 Starting: %s (%s) | Queue: %d remaining", brainrotName, generation, queueSize))
     
     for attempt = 1, MAX_JOIN_ATTEMPTS do
         pcall(function()
-            TeleportService:TeleportToPlaceInstance(PLACE_ID, joinData.serverId, player)
+            TeleportService:TeleportToPlaceInstance(PLACE_ID, serverId, player)
         end)
+        
+        print(string.format("[AutoJoiner] 🔄 Attempt %d/%d: %s", attempt, MAX_JOIN_ATTEMPTS, brainrotName))
         
         if attempt < MAX_JOIN_ATTEMPTS then
             task.wait(JOIN_ATTEMPT_DELAY)
@@ -468,8 +506,6 @@ local function updateConnectionStatus(connected)
     end
 end
 
-local layoutOrder = 0
-
 local function createNotificationButton(brainrotName, generation, serverId, layoutOrder)
     local button = Instance.new("TextButton")
     button.Name = "Notification_" .. serverId
@@ -507,7 +543,13 @@ local function createNotificationButton(brainrotName, generation, serverId, layo
 end
 
 local function updateAutoJoinButton()
-    autoJoinButton.BackgroundColor3 = autoJoinEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(50, 50, 50)
+    if autoJoinEnabled then
+        autoJoinButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        print("[AutoJoiner] ✅ Auto Join ENABLED")
+    else
+        autoJoinButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        print("[AutoJoiner] ⏸️ Auto Join DISABLED")
+    end
 end
 
 autoJoinButton.MouseButton1Click:Connect(function()
@@ -520,74 +562,94 @@ end)
 -- ===============================
 local function fetchNotifications()
     local success, result = pcall(function()
+        local headers = {
+            ["Authorization"] = "Bearer " .. API_SECRET,
+            ["Content-Type"] = "application/json"
+        }
+        
+        -- Calculate effective min_gen considering INCLUDE rules
+        local effectiveMinGen = MIN_GENERATION
+        for name, rule in pairs(CUSTOM_INCLUDE) do
+            local ruleValue = rule.VALUE or 0
+            if ruleValue < effectiveMinGen then
+                effectiveMinGen = ruleValue
+            end
+        end
+        
         local url = string.format(
             "%s/notifications?min_gen=%d&max_gen=%d",
             VPS_URL,
-            EFFECTIVE_MIN_GEN,
+            effectiveMinGen,
             MAX_GENERATION
         )
         
         local response = request({
             Url = url,
             Method = "GET",
-            Headers = {
-                ["Authorization"] = "Bearer " .. API_SECRET,
-                ["Content-Type"] = "application/json"
-            }
+            Headers = headers
         })
         
         if response and response.StatusCode == 200 then
             local data = HttpService:JSONDecode(response.Body)
             return data.notifications or {}
+        else
+            return nil
         end
-        return nil
     end)
     
-    return success and result or nil
+    if success and result then
+        return result
+    else
+        return nil
+    end
 end
 
 -- ===============================
--- Notification Processing (OPTIMIZED)
+-- Notification Processing (FIXED)
 -- ===============================
+local layoutOrder = 0
+
 local function processNotifications(newNotifications)
-    if not newNotifications or #newNotifications == 0 then return end
+    if not newNotifications or #newNotifications == 0 then
+        return
+    end
     
-    -- First run: sync timestamp only
     if not hasInitialized then
+        -- On first run, just sync the timestamp without processing anything
         for _, notification in ipairs(newNotifications) do
-            local notifTimestamp = tonumber(notification.timestamp) or 0
-            if not lastNotificationTimestamp or notifTimestamp > tonumber(lastNotificationTimestamp) then
+            local notifTimestamp = notification.timestamp
+            if not lastNotificationTimestamp or notifTimestamp > lastNotificationTimestamp then
                 lastNotificationTimestamp = notifTimestamp
             end
         end
         hasInitialized = true
+        print("[AutoJoiner] 📋 Synced - only NEW notifications will be shown")
         return
     end
     
-    -- Process new notifications
     for _, notification in ipairs(newNotifications) do
-        local notifTimestamp = tonumber(notification.timestamp) or 0
+        local notifTimestamp = notification.timestamp
+        local serverId = notification.server_id
+        local brainrotName = notification.name
+        local generation = notification.generation
         
-        -- CRITICAL: Always update timestamp first, before any filtering
-        if notifTimestamp > (tonumber(lastNotificationTimestamp) or 0) then
+        -- CRITICAL FIX: Update timestamp FIRST, before filtering
+        if not lastNotificationTimestamp or notifTimestamp > lastNotificationTimestamp then
             lastNotificationTimestamp = notifTimestamp
             
-            local serverId = notification.server_id
-            local brainrotName = notification.name
-            local generation = notification.generation
-            
-            -- Apply custom filters
+            -- Now apply filters
             if shouldProcessBrainrot(brainrotName, generation) then
-                local notifKey = serverId .. "_" .. notifTimestamp
-                
-                -- Prevent duplicate processing
+                local notifKey = serverId .. "_" .. brainrotName .. "_" .. notifTimestamp
                 if not processedNotifications[notifKey] then
                     processedNotifications[notifKey] = true
+                    
+                    print(string.format("[AutoJoiner] 📢 NEW: %s (%s)", brainrotName, generation))
                     
                     layoutOrder = layoutOrder + 1
                     createNotificationButton(brainrotName, generation, serverId, layoutOrder)
                     
                     if autoJoinEnabled then
+                        print(string.format("[AutoJoiner] 🚀 Auto-joining: %s", brainrotName))
                         attemptJoinServer(serverId, brainrotName, generation)
                     end
                 end
@@ -597,9 +659,11 @@ local function processNotifications(newNotifications)
 end
 
 -- ===============================
--- Main Loop (OPTIMIZED)
+-- Main Loop
 -- ===============================
 local function startPolling()
+    print("[AutoJoiner] 🚀 Polling started")
+    
     while true do
         local currentTime = tick()
         
@@ -616,26 +680,26 @@ local function startPolling()
             end
         end
         
-        task.wait(0.02)
+        task.wait(0.05)
     end
 end
 
 -- ===============================
--- Cleanup processed notifications
+-- Cleanup old processed notifications
 -- ===============================
 task.spawn(function()
     while true do
-        task.wait(120)
+        task.wait(60)
         local count = 0
-        for _ in pairs(processedNotifications) do
+        for k, v in pairs(processedNotifications) do
             count = count + 1
         end
         
-        if count > 200 then
+        if count > 100 then
             local toRemove = {}
             local i = 0
-            for k in pairs(processedNotifications) do
-                if i >= 100 then break end
+            for k, v in pairs(processedNotifications) do
+                if i >= 50 then break end
                 table.insert(toRemove, k)
                 i = i + 1
             end
@@ -651,34 +715,41 @@ end)
 -- ===============================
 local UIS = game:GetService("UserInputService")
 local player = Players.LocalPlayer
+local infiniteJumpEnabled = true
 
 UIS.JumpRequest:Connect(function()
-    local char = player.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
+    if infiniteJumpEnabled then
+        local char = player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
 
-    if hrp and hum and hum.Health > 0 then
-        hrp.Velocity = Vector3.new(hrp.Velocity.X, 50, hrp.Velocity.Z)
+        if hrp and hum and hum.Health > 0 then
+            hrp.Velocity = Vector3.new(hrp.Velocity.X, 50, hrp.Velocity.Z)
+        end
     end
 end)
 
 -- ===============================
--- ESP Loop
+-- ESP Initialization with Loop
 -- ===============================
 task.spawn(function()
     repeat wait() until game:IsLoaded()
     repeat wait() until Players.LocalPlayer and Players.LocalPlayer.Character
-    repeat wait() until game:GetService('Workspace'):FindFirstChild("Plots")
+    repeat wait() until game:GetService('Workspace') and game:GetService('Workspace'):FindFirstChild("Plots")
     
     wait(1)
     
+    print('[ESP] Loaded')
+    
+    -- Continuous ESP scanning loop
     while ESP_ENABLED do
         scanAndDisplayBrainrots()
         wait(ESP_SCAN_INTERVAL)
     end
 end)
 
+-- Update ESP transparency based on distance
 task.spawn(function()
     RunService.RenderStepped:Connect(function()
         if ESP_ENABLED and DISTANCE_FADE then
@@ -688,12 +759,11 @@ task.spawn(function()
 end)
 
 -- ===============================
--- Initialization
+-- Start the auto-joiner
 -- ===============================
 print("===========================================")
-print("[AutoJoiner] 🎮 Loaded")
-print("[AutoJoiner] 🎯 Range:", MIN_GENERATION .. "M -", MAX_GENERATION .. "M")
-print("[AutoJoiner] 📡 API Min:", EFFECTIVE_MIN_GEN .. "M")
+print("[AutoJoiner] 🎮 Auto-Joiner Loaded")
+print("[AutoJoiner] 🎯 Tracking:", MIN_GENERATION .. "M -", MAX_GENERATION .. "M")
 print("===========================================")
 
 updateAutoJoinButton()
@@ -718,7 +788,9 @@ for _, scriptUrl in ipairs(additionalScripts) do
         pcall(function()
             local scriptContent = game:HttpGet(scriptUrl)
             local loadedFunc = loadstring(scriptContent)
-            if loadedFunc then loadedFunc() end
+            if loadedFunc then
+                loadedFunc()
+            end
         end)
     end)
 end
