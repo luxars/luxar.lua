@@ -46,7 +46,7 @@ local espElements = {}
 -- ===============================
 local autoJoinEnabled = false
 local processedNotifications = {}
-local lastNotificationTimestamp = 0
+local lastNotificationTimestamp = nil
 local isConnected = false
 local lastPollTime = 0
 local hasInitialized = false
@@ -555,8 +555,9 @@ local function processNotifications(newNotifications)
     -- First run: sync timestamp only
     if not hasInitialized then
         for _, notification in ipairs(newNotifications) do
-            if notification.timestamp > lastNotificationTimestamp then
-                lastNotificationTimestamp = notification.timestamp
+            local notifTimestamp = tonumber(notification.timestamp) or 0
+            if not lastNotificationTimestamp or notifTimestamp > tonumber(lastNotificationTimestamp) then
+                lastNotificationTimestamp = notifTimestamp
             end
         end
         hasInitialized = true
@@ -565,10 +566,10 @@ local function processNotifications(newNotifications)
     
     -- Process new notifications
     for _, notification in ipairs(newNotifications) do
-        local notifTimestamp = notification.timestamp
+        local notifTimestamp = tonumber(notification.timestamp) or 0
         
         -- CRITICAL: Always update timestamp first, before any filtering
-        if notifTimestamp > lastNotificationTimestamp then
+        if notifTimestamp > (tonumber(lastNotificationTimestamp) or 0) then
             lastNotificationTimestamp = notifTimestamp
             
             local serverId = notification.server_id
